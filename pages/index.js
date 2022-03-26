@@ -47,10 +47,10 @@ transaction(price:UFix64,acct2Transfer:Address) {
 
 const SIMPLE_PRINT_SCRIPT = `\
   
-  import ExampleNFT from 0x230f446f2d449742
+  import ExampleNFT from 0x20a1514850974256
 
 pub fun main(recipient: Address) :[UInt64]{
-    let nftOwner = getAccount(0xcefbefa723aa9d34)
+    let nftOwner = getAccount(recipient)
 
     let capability = nftOwner.getCapability<&{ExampleNFT.NFTReceiver}>(ExampleNFT.CollectionPublicPath)
 
@@ -65,29 +65,37 @@ pub fun main(recipient: Address) :[UInt64]{
 
 const MINT = `\
 
+// Mint NFT
 
-import ExampleNFT from 0x230f446f2d449742
+import ExampleNFT from 0x20a1514850974256
 
-
+// This transaction allows the Minter account to mint an NFT
+// and deposit it into its collection.
 
 transaction {
 
+    // The reference to the collection that will be receiving the NFT
     let receiverRef: &{ExampleNFT.NFTReceiver}
 
-    let minterRef: &ExampleNFT.NFTMinter
+    // The reference to the Minter resource stored in account storage
+    
+    let addr: Address
 
     prepare(acct: AuthAccount) {
-        self.receiverRef = acct.getCapability<&{ExampleNFT.NFTReceiver}>(ExampleNFT.CollectionPublicPath)
-            .borrow()
-            ?? panic("Could not borrow receiver reference")
-        
-        self.minterRef = acct.borrow<&ExampleNFT.NFTMinter>(from: ExampleNFT.MinterStoragePath)
-            ?? panic("could not borrow minter reference")
+        self.receiverRef = acct.getCapability<&{ExampleNFT.NFTReceiver}>(/public/NFTReceiver).borrow()!
+        self.addr = acct.address
     }
 
     execute {
+        let minterRef = getAccount(0x20a1514850974256).getCapability<&ExampleNFT.NFTMinter>(/public/Minter).borrow()
+        ?? panic("couldnt borrow accounts minter")
 
-        let newNFT <- self.minterRef.mintNFT()
+        // Use the minter reference to mint an NFT, which deposits
+        // the NFT into the collection that is sent as a parameter.
+        let newNFT <- minterRef.mintNFT(
+          founder: self.addr,
+          royaltyPercent: 0.2
+        )
 
         self.receiverRef.deposit(token: <-newNFT)
 
@@ -98,10 +106,10 @@ transaction {
 
 const BUY_NFT = `\
 
-import FlowToken from 0x0ae53cb6e3f42a79
-import ExampleNFT from 0xf8d6e0586b0a20c7
-import FungibleToken from 0xf8d6e0586b0a20c7
-import ExampleMarketplace from 0xf8d6e0586b0a20c7
+import FlowToken from 0x7e60df042a9c0868
+import ExampleNFT from 0x20a1514850974256
+import FungibleToken from 0x9a0766d93b6608b7
+import ExampleMarketplace from 0x20a1514850974256
 
 
 transaction {
@@ -139,9 +147,11 @@ transaction {
 const PREP_SALE = `\
 
 import FlowToken from 0x7e60df042a9c0868
+
+import ExampleNFT from 0x20a1514850974256
+
 import FungibleToken from 0x9a0766d93b6608b7
-import ExampleNFT from 0x230f446f2d449742
-import ExampleMarketplace from 0x230f446f2d449742
+import ExampleMarketplace from 0x20a1514850974256
 
 
   transaction {
@@ -159,7 +169,7 @@ import ExampleMarketplace from 0x230f446f2d449742
       let sale <- ExampleMarketplace.createSaleCollection(ownerCollection: collectionCapability, ownerVault: receiver)
 
      
-      sale.listForSale(tokenID: 1, price: 500.0)
+      sale.listForSale(tokenID: 2, price: 50.0)
 
      
       acct.save(<-sale, to: /storage/NFTSale)
@@ -174,7 +184,7 @@ import ExampleMarketplace from 0x230f446f2d449742
 
 const PRE_ACCT = `\
 
-import ExampleNFT from 0x230f446f2d449742
+import ExampleNFT from 0x20a1514850974256
 
 
 transaction {
@@ -235,8 +245,8 @@ transaction {
 `
 const PLACE_BID = `\
 
-import ExampleNFT from 0x230f446f2d449742
-import Auction from 0x230f446f2d449742
+import ExampleNFT from 0x20a1514850974256
+import Auction from 0x20a1514850974256
 
 import FlowToken from 0x7e60df042a9c0868
 
@@ -271,7 +281,7 @@ transaction() {
         let vaultRef = account.borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
             ?? panic("Could not borrow owner's Vault reference")
 
-        let auctionHouseAdmin = getAccount(0x230f446f2d449742)
+        let auctionHouseAdmin = getAccount(0x20a1514850974256)
         
         let auctionRef = auctionHouseAdmin.getCapability<&{Auction.AuctionPublic}>(/public/AuctionPublic).borrow()
             ?? panic("Could not borrow auction")
@@ -317,8 +327,8 @@ transaction {
 `
 
 const PLACE_PROP = `\
-import ExampleNFT from 0x230f446f2d449742
-import Auction from 0x230f446f2d449742
+import ExampleNFT from 0x20a1514850974256
+import Auction from 0x20a1514850974256
 
 
 import FungibleToken from 0xf8d6e0586b0a20c7
@@ -366,7 +376,7 @@ transaction() {
         let vaultRef = account.borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
             ?? panic("Could not borrow owner's Vault reference")
 
-        let auctionHouseAdmin = getAccount(0x230f446f2d449742)
+        let auctionHouseAdmin = getAccount(0x20a1514850974256)
         
         let auctionRef = auctionHouseAdmin.getCapability<&{Auction.AuctionPublic}>(/public/AuctionPublic).borrow()
             ?? panic("Could not borrow auction")
@@ -389,7 +399,7 @@ transaction() {
 `
 const SETTLE_AUC = `\
 
-import Auction from 0x230f446f2d449742
+import Auction from 0x20a1514850974256
 
 transaction() {
 
@@ -398,7 +408,7 @@ transaction() {
 
     
         
-      let auctionHouseAdmin = getAccount(0x230f446f2d449742)
+      let auctionHouseAdmin = getAccount(0x20a1514850974256)
         let auctionRef = account.borrow<&Auction.AuctionCollection>(from: /storage/AuctionHouse)
             ?? panic("Could not borrow auction")
             
