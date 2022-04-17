@@ -84,9 +84,23 @@ transaction {
     let addr: Address
 
     prepare(acct: AuthAccount) {
-        self.receiverRef = acct.getCapability<&{TopTNFTContract.CollectionPublic}>(TopTNFTContract.CollectionPublicPath).borrow()!
-        self.addr = acct.address
-        self.creatorWalletCap = acct.getCapability<&{FungibleToken.Receiver}>(/public/flowTokenReceiver)
+      var collectionCap = acct.getCapability<&{TopTNFTContract.CollectionPublic}>(TopTNFTContract.CollectionPublicPath)
+
+      // if collection is not created yet we make it.
+      if !collectionCap.check() {
+        acct.unlink(TopTNFTContract.CollectionPublicPath)
+        destroy <- acct.load<@AnyResource>(from:TopTNFTContract.CollectionStoragePath)
+  
+        // store an empty NFT Collection in acct storage
+        acct.save<@TopTNFTContract.Collection>(<- TopTNFTContract.createEmptyCollection(), to: TopTNFTContract.CollectionStoragePath)
+  
+        // publish a capability to the Collection in storage
+        acct.link<&{TopTNFTContract.CollectionPublic}>(TopTNFTContract.CollectionPublicPath, target: TopTNFTContract.CollectionStoragePath)
+      }
+    self.receiverRef = collectionCap.borrow()
+      ?? panic("couldn't borrow collection of receiver")
+    self.addr = acct.address
+    self.creatorWalletCap = acct.getCapability<&{FungibleToken.Receiver}>(/public/flowTokenReceiver)
     }
 
     execute {
@@ -107,6 +121,7 @@ transaction {
         log("NFT Minted and deposited to Account 2's Collection")
     }
 }
+ 
  
     `
 
@@ -423,7 +438,7 @@ pub fun main(recipient: Address) :[UInt64]{
 `
 const SETTLE_AUC = `\
 
-import Auction from 0x20a1514850974256
+import Auction from 0xf8d6e0586b0a20c7
 
 transaction() {
 
@@ -432,15 +447,16 @@ transaction() {
 
     
         
-      let auctionHouseAdmin = getAccount(0x20a1514850974256)
+      let auctionHouseAdmin = getAccount(0xf8d6e0586b0a20c7)
         let auctionRef = account.borrow<&Auction.AuctionCollection>(from: /storage/AuctionHouse)
             ?? panic("Could not borrow auction")
             
         
-        auctionRef.changeLength(id:3,amount:0.0)
-        auctionRef.settleAuction(3)
+        auctionRef.changeLength(id:1,amount:0.0)
+        auctionRef.settleAuction(1)
     }
 }
+
 `
 const BUY = `\
 import Marketplace from 0x20a1514850974256
