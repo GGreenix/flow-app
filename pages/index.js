@@ -10,95 +10,44 @@ fcl.config()
     'https://flow-wallet-testnet.blocto.app/api/flow/authn'
   ).put('discovery.wallet.method', 'HTTP/POST'); 
   // access through alchemy^^^^^ DONT USE BEFORE ADDITIONAL RESEARCH ABOUT TRIAL
+  // fcl.config({
+  //   "accessNode.api": "https://access-testnet.onflow.org", // Mainnet: "https://access-mainnet-beta.onflow.org"
+  //   "discovery.wallet": "https://fcl-discovery.onflow.org/testnet/authn" // Mainnet: "https://fcl-discovery.onflow.org/authn"
+  // })
   
   
-
-  // fcl.config()
-  // .put("accessNode.api", "http://localhost:8080",)
-  // .put("discovery.wallet", "http://localhost:8701/fcl/authn")
-
-  const LIST_FOR_SALE = `\
-
-  import Marketplace from 0x20a1514850974256
-  import TopTNFTContract from 0x20a1514850974256
-  import FungibleToken from 0x9a0766d93b6608b7
-  
-  //this transaction will setup an newly minted item for sale
-  transaction(
-      // artId: UInt64
-      // price: UFix64
-      ) {
-  
-      let artCollection:&TopTNFTContract.Collection
-      let marketplace: &Marketplace.SaleCollection
-  
-      prepare(account: AuthAccount) {
-  
-  
-          let marketplaceCap = account.getCapability<&{Marketplace.SalePublic}>(Marketplace.CollectionPublicPath)
-          // if sale collection is not created yet we make it.
-          if !marketplaceCap.check() {
-               let wallet=  account.getCapability<&{FungibleToken.Receiver}>(/public/flowTokenReceiver)
-               let sale <- Marketplace.createSaleCollection(ownerVault: wallet)
-  
-              account.unlink(Marketplace.CollectionPublicPath)
-              destroy <- account.load<@AnyResource>(from:Marketplace.CollectionStoragePath)
-  
-              // store an empty NFT Collection in account storage
-              account.save<@Marketplace.SaleCollection>(<- sale, to:Marketplace.CollectionStoragePath)
-  
-              // publish a capability to the Collection in storage
-              account.link<&{Marketplace.SalePublic}>(Marketplace.CollectionPublicPath, target: Marketplace.CollectionStoragePath)
-          }
-  
-          self.marketplace=account.borrow<&Marketplace.SaleCollection>(from: Marketplace.CollectionStoragePath)
-            ?? panic("cant borrow marketplace")
-          self.artCollection= account.borrow<&TopTNFTContract.Collection>(from: TopTNFTContract.CollectionStoragePath)
-            ?? panic("cant borrow art collection")
-      }
-  
-      execute {
-          let art <- self.artCollection.withdraw(withdrawID: 8) as! @TopTNFTContract.NFT
-          self.marketplace.listForSale(token: <- art, price: 5.0)
-          self.marketplace.changePrice(tokenID: 8, newPrice: 10.0)
-      }
-  }
-  
-  `
-
-
-
 const MINT = `\
 
 // Mint NFT
-
-import TopTNFTContract from 0x20a1514850974256
-import FungibleToken from 0x9a0766d93b6608b7
+import NonFungibleToken from 0xf8d6e0586b0a20c7
+import TopTCollection from 0xf8d6e0586b0a20c7
+import FungibleToken from 0xee82856bf20e2aa6
 
 
 transaction {
 
-    let receiverRef: &{TopTNFTContract.CollectionPublic}
+    let receiverRef: &TopTCollection.Collection{NonFungibleToken.CollectionPublic, TopTCollection.TopTCollectionPublic}
     let creatorWalletCap: Capability<&{FungibleToken.Receiver}> 
    
     let addr: Address
 
     prepare(acct: AuthAccount) {
-      var collectionCap = acct.getCapability<&{TopTNFTContract.CollectionPublic}>(TopTNFTContract.CollectionPublicPath)
+      
 
       // if collection is not created yet we make it.
-      if !collectionCap.check() {
-        acct.unlink(TopTNFTContract.CollectionPublicPath)
-        destroy <- acct.load<@AnyResource>(from:TopTNFTContract.CollectionStoragePath)
-  
-        // store an empty NFT Collection in acct storage
-        acct.save<@TopTNFTContract.Collection>(<- TopTNFTContract.createEmptyCollection(), to: TopTNFTContract.CollectionStoragePath)
-  
-        // publish a capability to the Collection in storage
-        acct.link<&{TopTNFTContract.CollectionPublic}>(TopTNFTContract.CollectionPublicPath, target: TopTNFTContract.CollectionStoragePath)
-      }
-    self.receiverRef = collectionCap.borrow()
-      ?? panic("couldn't borrow collection of receiver")
+      if acct.borrow<&TopTCollection.Collection>(from: TopTCollection.CollectionStoragePath) == nil {
+
+            // create a new empty collection
+            let collection <- TopTCollection.createEmptyCollection()
+            
+            // save it to the account
+            acct.save(<-collection, to: TopTCollection.CollectionStoragePath)
+
+            // create a public capability for the collection
+            acct.link<&TopTCollection.Collection{NonFungibleToken.CollectionPublic, TopTCollection.TopTCollectionPublic}>(TopTCollection.CollectionPublicPath, target: TopTCollection.CollectionStoragePath)
+        }
+      
+    self.receiverRef = acct.getCapability<&TopTCollection.Collection{NonFungibleToken.CollectionPublic, TopTCollection.TopTCollectionPublic}>(TopTCollection.CollectionPublicPath).borrow()!
     self.addr = acct.address
     self.creatorWalletCap = acct.getCapability<&{FungibleToken.Receiver}>(/public/flowTokenReceiver)
     }
@@ -107,424 +56,256 @@ transaction {
         
 
         self.receiverRef.deposit(token: <-
-        TopTNFTContract.createArtWithContent(
+        TopTCollection.mintNFT(
             name:"tal",
             description: "cool NFT",
+            caption: "String ",
+            storagePath: "String",
             artistAddress: self.addr,
-            royalty: TopTNFTContract.Royalty(
+            royalty: TopTCollection.Royalty(
                 wallet: self.creatorWalletCap,
                 cut: 0.1
-            )
+            ),
+            
+
           )
         )
 
-        log("NFT Minted and deposited to Account 2's Collection")
     }
 }
  
- 
-    `
 
-const BUY_NFT = `\
-import Marketplace from 0x20a1514850974256
-import TopTNFTContract from 0x20a1514850974256
-import FungibleToken from 0x9a0766d93b6608b7
-
-//Transaction to make a bid in a marketplace for the given dropId and auctionId
-transaction(
-    // marketplace: Address, tokenId: UInt64, amount: UFix64
-    ) {
-	// reference to the buyer's NFT collection where they
-	// will store the bought NFT
-	let vaultCap: Capability<&{FungibleToken.Receiver}>
-	let collectionCap: Capability<&{TopTNFTContract.CollectionPublic}> 
-	// Vault that will hold the tokens that will be used
-	// to buy the NFT
-	let temporaryVault: @FungibleToken.Vault
-
-	prepare(account: AuthAccount) {
-
-		// get the references to the buyer's Vault and NFT Collection receiver
-		var collectionCap = account.getCapability<&{TopTNFTContract.CollectionPublic}>(TopTNFTContract.CollectionPublicPath)
-
-		// if collection is not created yet we make it.
-		if !collectionCap.check() {
-			account.unlink(TopTNFTContract.CollectionPublicPath)
-			destroy <- account.load<@AnyResource>(from:TopTNFTContract.CollectionStoragePath)
-
-			// store an empty NFT Collection in account storage
-			account.save<@TopTNFTContract.Collection>(<- TopTNFTContract.createEmptyCollection(), to: TopTNFTContract.CollectionStoragePath)
-
-			// publish a capability to the Collection in storage
-			account.link<&{TopTNFTContract.CollectionPublic}>(TopTNFTContract.CollectionPublicPath, target: TopTNFTContract.CollectionStoragePath)
-		}
-
-		self.collectionCap=collectionCap
-
-		self.vaultCap = account.getCapability<&{FungibleToken.Receiver}>(/public/flowTokenReceiver)
-
-		let vaultRef = account.borrow<&FungibleToken.Vault>(from: /storage/flowTokenVault)
-		?? panic("Could not borrow owner's Vault reference")
-
-		// withdraw tokens from the buyer's Vault
-		self.temporaryVault <- vaultRef.withdraw(amount: 10.0)
-	}
-
-	execute {
-		// get the read-only account storage of the seller
-		let seller = getAccount(0x2f8ea8e52041ed8e)
-
-		let marketplace= seller.getCapability(Marketplace.CollectionPublicPath).borrow<&{Marketplace.SalePublic}>()
-		?? panic("Could not borrow seller's sale reference")
-
-		marketplace.purchase(tokenID: 8, recipientCap:self.collectionCap, buyTokens: <- self.temporaryVault)
-	}
-}
-    `
-
-  const PREPARE_COLL_SALE = `\
-  import Marketplace from 0x20a1514850974256
-import TopTNFTContract from 0x20a1514850974256
-import FungibleToken from 0x9a0766d93b6608b7
-
-//this transaction will setup an newly minted item for sale
-transaction(
-    // artId: UInt64
-    // price: UFix64
-    ) {
-
-    let artCollection:&TopTNFTContract.Collection
-    let marketplace: &Marketplace.SaleCollection
-
-    prepare(account: AuthAccount) {
-
-
-        let marketplaceCap = account.getCapability<&{Marketplace.SalePublic}>(Marketplace.CollectionPublicPath)
-        // if sale collection is not created yet we make it.
-        if !marketplaceCap.check() {
-             let wallet=  account.getCapability<&{FungibleToken.Receiver}>(/public/flowTokenReceiver)
-             let sale <- Marketplace.createSaleCollection(ownerVault: wallet)
-
-						account.unlink(Marketplace.CollectionPublicPath)
-						destroy <- account.load<@AnyResource>(from:Marketplace.CollectionStoragePath)
-
-            // store an empty NFT Collection in account storage
-            account.save<@Marketplace.SaleCollection>(<- sale, to:Marketplace.CollectionStoragePath)
-
-            // publish a capability to the Collection in storage
-            account.link<&{Marketplace.SalePublic}>(Marketplace.CollectionPublicPath, target: Marketplace.CollectionStoragePath)
-        }
-
-        self.marketplace=account.borrow<&Marketplace.SaleCollection>(from: Marketplace.CollectionStoragePath)!
-        self.artCollection= account.borrow<&TopTNFTContract.Collection>(from: TopTNFTContract.CollectionStoragePath)!
-    }
-
-    execute {
-        let art <- self.artCollection.withdraw(withdrawID: 0) as! @TopTNFTContract.NFT
-        self.marketplace.listForSale(token: <- art, price: 5.0)
-        self.marketplace.changePrice(tokenID: 0, newPrice: 10.0)
-    }
-}
+`
+const LAZY_MINT = `\
   
-  
-  `
-const PREP_AUCTION = `\
 
-// Transaction1.cdc
-import FungibleToken from 0xf8d6e0586b0a20c7
-import ExampleNFT from 0xf8d6e0586b0a20c7
-import Auction from 0xf8d6e0586b0a20c7
+// Mint NFT
+import NonFungibleToken from 0xf8d6e0586b0a20c7
+import TopTCollection from 0xf8d6e0586b0a20c7
+import FungibleToken from 0xee82856bf20e2aa6
+import FlowToken from 0x0ae53cb6e3f42a79
 
+transaction(
+    seller: Address,
+    royaltyCut: UFix64,
+    salePrice: UFix64
+) {
 
-transaction {
-
-    // No need to do anything in prepare because we are not working with
-    // account storage.
-	prepare(acct: AuthAccount) {
-    let receiver = acct.getCapability<&{FungibleToken.Receiver}>(/public/Receiver)
-    let auctionHouse <- Auction.createAuctionCollection(marketplaceVault: receiver,cutPercentage:0.1)
+    let receiverRef: &TopTCollection.Collection{NonFungibleToken.CollectionPublic, TopTCollection.TopTCollectionPublic}
+    let creatorWalletCap: Capability<&{FungibleToken.Receiver}> 
     
-			
-		// Store the vault in the account storage
-	
-    // Create a new empty collection
-    
-    
-    // store the empty NFT Collection in account storage
-    
-    acct.save(<- auctionHouse, to: /storage/AuctionHouse)
-    
+    let addr: Address
 
-    acct.link<&{Auction.AuctionPublic}>(/public/AuctionPublic, target: /storage/AuctionHouse)
-    
-    
-    log("Auction created and stored at Signer account")
-    log("Collection created for account 1")
-    }
-
-    // In execute, we simply call the hello function
-    // of the HelloWorld contract and log the returned String.
-	execute {
-	  	
-	}
-}
-`
-const PLACE_BID = `\
-
-import ExampleNFT from 0x20a1514850974256
-import Auction from 0x20a1514850974256
-
-import FlowToken from 0x7e60df042a9c0868
-
-import FungibleToken from 0x9a0766d93b6608b7
-
-transaction() {
-
-    let vaultCap: Capability<&{FungibleToken.Receiver}>
-    let collectionCap: Capability<&{ExampleNFT.NFTReceiver}> 
-    
-    
-
-    prepare(account: AuthAccount) {
-
-        var collectionCap = account.getCapability<&{ExampleNFT.NFTReceiver}>(/public/NFTReceiver)
-
-        if !collectionCap.check() {
-					  account.unlink(ExampleNFT.CollectionPublicPath)
-					  destroy <- account.load<@AnyResource>(from:ExampleNFT.CollectionStoragePath)
-            
-
-            account.link<&{ExampleNFT.NFTReceiver}>(ExampleNFT.CollectionPublicPath, target: ExampleNFT.CollectionStoragePath)
-        }
-        let collectionRef = account.borrow<&ExampleNFT.Collection>(from: /storage/NFTCollection)
-            ?? panic("Could not borrow a reference to the owner's collection")
-
-        
-        self.collectionCap=collectionCap
-        
-        self.vaultCap = account.getCapability<&FlowToken.Vault{FungibleToken.Receiver}>(/public/flowTokenReciver)
-                   
-        let vaultRef = account.borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
-            ?? panic("Could not borrow owner's Vault reference")
-
-        let auctionHouseAdmin = getAccount(0x20a1514850974256)
-        
-        let auctionRef = auctionHouseAdmin.getCapability<&{Auction.AuctionPublic}>(/public/AuctionPublic).borrow()
-            ?? panic("Could not borrow auction")
-            
-        auctionRef.placeBid(id: 3,bidTokens: <-vaultRef.withdraw(amount: 10.0),vaultCap: self.vaultCap,collectionCap: self.collectionCap)
-    }
-   
-
-    execute {
-        
-    }
-}
-`
-
-
-const PLACE_PROP = `\
-import ExampleNFT from 0x20a1514850974256
-import Auction from 0x20a1514850974256
-
-
-import FungibleToken from 0xf8d6e0586b0a20c7
-
-// Transaction to make a bid in a marketplace for the given dropId and auctionId
-transaction() {
-    // reference to the buyer's NFT collection where they
-    // will store the bought NFT
-
-    let vaultCap: Capability<&{FungibleToken.Receiver}>
-    let collectionCap: Capability<&{ExampleNFT.NFTReceiver}> 
-    
-    
-
-    prepare(account: AuthAccount) {
-
-        // get the references to the buyer's Vault and NFT Collection receiver
-        var collectionCap = account.getCapability<&{ExampleNFT.NFTReceiver}>(/public/NFTReceiver)
-
-        // if collection is not created yet we make it.
-        if !collectionCap.check() {
-					  account.unlink(ExampleNFT.CollectionPublicPath)
-					  destroy <- account.load<@AnyResource>(from:ExampleNFT.CollectionStoragePath)
-            // store an empty NFT Collection in account storage
-            
-
-            // publish a capability to the Collection in storage
-            account.link<&{ExampleNFT.NFTReceiver}>(ExampleNFT.CollectionPublicPath, target: ExampleNFT.CollectionStoragePath)
-        }
-        let collectionRef = account.borrow<&ExampleNFT.Collection>(from: /storage/NFTCollection)
-            ?? panic("Could not borrow a reference to the owner's collection")
-
-        
-
-        // Call the withdraw function on the sender's Collection
-        // to move the NFT out of the collection
-        
-        // Call the withdraw function on the sender's Collection
-        // to move the NFT out of the collection
-        
-        self.collectionCap=collectionCap
-        
-        self.vaultCap = account.getCapability<&FlowToken.Vault{FungibleToken.Receiver}>(/public/flowTokenReciver)
-                   
-        let vaultRef = account.borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
-            ?? panic("Could not borrow owner's Vault reference")
-
-        let auctionHouseAdmin = getAccount(0x20a1514850974256)
-        
-        let auctionRef = auctionHouseAdmin.getCapability<&{Auction.AuctionPublic}>(/public/AuctionPublic).borrow()
-            ?? panic("Could not borrow auction")
-            
-        
-        auctionRef.createAuction(
-            token: <- collectionRef.withdraw(withdrawID: 2), 
-            minimumBidIncrement: 0.0, 
-            auctionLength: 1000000.0, 
-            auctionStartTime: getCurrentBlock().timestamp,
-            startPrice: 10.0, 
-            collectionCap: self.collectionCap, 
-            vaultCap: self.vaultCap) 
-    }
-    
-
-    
-}
- 
-`
-
-const PREPARE_NFT_COLLECTION = `\
-import TopTNFTContract from 0x20a1514850974256
-
-
-transaction {
     prepare(acct: AuthAccount) {
+      
 
-        // Create a new empty collection
-        
-        let newCollection <- TopTNFTContract.createEmptyCollection()
-			
-		// Store the vault in the account storage
-	acct.save<@TopTNFTContract.Collection>(<- newCollection, to: TopTNFTContract.CollectionStoragePath)
-    // Create a new empty collection
-    
-    let ReceiverRef = acct.link<&{TopTNFTContract.CollectionPublic}>(TopTNFTContract.CollectionPublicPath, target: TopTNFTContract.CollectionStoragePath)
-        // store the empty NFT Collection in account storage
+      // if collection is not created yet we make it.
+      if acct.borrow<&TopTCollection.Collection>(from: TopTCollection.CollectionStoragePath) == nil {
+
+            // create a new empty collection
+            let collection <- TopTCollection.createEmptyCollection()
+            
+            // save it to the account
+            acct.save(<-collection, to: TopTCollection.CollectionStoragePath)
+
+            // create a public capability for the collection
+            acct.link<&TopTCollection.Collection{NonFungibleToken.CollectionPublic, TopTCollection.TopTCollectionPublic}>(TopTCollection.CollectionPublicPath, target: TopTCollection.CollectionStoragePath)
+        }
+      
+    self.receiverRef = acct.getCapability<&TopTCollection.Collection{NonFungibleToken.CollectionPublic, TopTCollection.TopTCollectionPublic}>(TopTCollection.CollectionPublicPath).borrow()!
+    self.addr = acct.address
+    self.creatorWalletCap = getAccount(seller).getCapability<&{FungibleToken.Receiver}>(/public/flowTokenReceiver)
+    let mainFlowVault = acct.borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
+            ?? panic("Cannot borrow FlowToken vault from acct storage")
+    self.creatorWalletCap.borrow()!.deposit(from: <- mainFlowVault.withdraw(amount: salePrice))
+    }
+
+    execute {
         
 
-        
+        self.receiverRef.deposit(token: <-
+        TopTCollection.mintNFT(
+            name:"tal",
+            description: "cool NFT",
+            caption: "String ",
+            storagePath: "String",
+            artistAddress: seller,
+            royalty: TopTCollection.Royalty(
+                wallet: self.creatorWalletCap,
+                cut: royaltyCut
+            ),
+            
+
+          )
+        )
+
     }
 }
  
 `
+const PRINT_SALES = `\
+  
+import NFTStorefront from 0xf8d6e0586b0a20c7
+
+// This script returns an array of all the nft uuids for sale through a Storefront
+pub fun main(account: Address): [UInt64] {
+    let storefrontRef = getAccount(account)
+        .getCapability<&NFTStorefront.Storefront{NFTStorefront.StorefrontPublic}>(
+            NFTStorefront.StorefrontPublicPath
+        )
+        .borrow()
+        ?? panic("Could not borrow public storefront from address")
+    let listingArray = storefrontRef.getListingIDs()
+let listing = storefrontRef.borrowListing(listingResourceID: listingArray[2]!)!
+// log(storefrontRef.getListingIDs())
+log(listing)
+return storefrontRef.getListingIDs()
+    
+}
+`
+
 const SIMPLE_PRINT_SCRIPT = `\
   
-  import TopTNFTContract from 0x20a1514850974256
+import TopTCollection from 0x1ce0bf81f5ff5ade
 
-pub fun main(recipient: Address) :[UInt64]{
-    let nftOwner = getAccount(recipient)
+pub fun main(
+  // recipient: Address
+  ) :[UInt64]{
+    let nftOwner = getAccount(0x1ce0bf81f5ff5ade)
 
-    let capability = nftOwner.getCapability<&{TopTNFTContract.CollectionPublic}>(TopTNFTContract.CollectionPublicPath)
+    let capability = nftOwner.getCapability<&{TopTCollection.TopTCollectionPublic}>(TopTCollection.CollectionPublicPath)
 
     let receiverRef = capability.borrow()
         ?? panic("Could not borrow the receiver reference")
 
-    log("Account 2 NFTs")
-    log(receiverRef.getIDs())
+    
+    log(TopTCollection.getArt(address: 0x1ce0bf81f5ff5ade))
     return receiverRef.getIDs()
 }
 `
-const SETTLE_AUC = `\
 
-import Auction from 0xf8d6e0586b0a20c7
+const BUY = `\
+import FungibleToken from 0xee82856bf20e2aa6
+import NonFungibleToken from 0xf8d6e0586b0a20c7
+import FlowToken from 0x0ae53cb6e3f42a79
+import TopTCollection from 0xf8d6e0586b0a20c7
+import NFTStorefront from 0xf8d6e0586b0a20c7
 
-transaction() {
 
+transaction(
+    listingResourceID: UInt64, storefrontAddress: Address
+    ) {
+    let paymentVault: @FungibleToken.Vault
+    let exampleNFTCollection: &TopTCollection.Collection{NonFungibleToken.Receiver}
+    let storefront: &NFTStorefront.Storefront{NFTStorefront.StorefrontPublic}
+    let listing: &NFTStorefront.Listing{NFTStorefront.ListingPublic}
 
-    prepare(account: AuthAccount) {
+    prepare(acct: AuthAccount) {
+        self.storefront = getAccount(storefrontAddress)
+            .getCapability<&NFTStorefront.Storefront{NFTStorefront.StorefrontPublic}>(
+                NFTStorefront.StorefrontPublicPath
+            )!
+            .borrow()
+            ?? panic("Could not borrow Storefront from provided address")
 
-    
-        
-      let auctionHouseAdmin = getAccount(0xf8d6e0586b0a20c7)
-        let auctionRef = account.borrow<&Auction.AuctionCollection>(from: /storage/AuctionHouse)
-            ?? panic("Could not borrow auction")
-            
-        
-        auctionRef.changeLength(id:1,amount:0.0)
-        auctionRef.settleAuction(1)
+        self.listing = self.storefront.borrowListing(listingResourceID: listingResourceID)
+                    ?? panic("No Offer with that ID in Storefront")
+        let price = self.listing.getDetails().salePrice
+
+        let mainFlowVault = acct.borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
+            ?? panic("Cannot borrow FlowToken vault from acct storage")
+        self.paymentVault <- mainFlowVault.withdraw(amount: price)
+
+        self.exampleNFTCollection = acct.borrow<&TopTCollection.Collection{NonFungibleToken.Receiver}>(
+            from: TopTCollection.CollectionStoragePath
+        ) ?? panic("Cannot borrow NFT collection receiver from account")
+    }
+
+    execute {
+        let item <- self.listing.purchase(
+            payment: <-self.paymentVault
+        )
+
+        self.exampleNFTCollection.deposit(token: <-item)
+
+        /* //-
+        error: Execution failed:
+        computation limited exceeded: 100
+        */
+        // Be kind and recycle
+        //self.storefront.cleanup(listingResourceID: listingResourceID)
+    }
+
+    //- Post to check item is in collection?
+}
+`
+const LIST_FOR_SALE = `\
+import FungibleToken from 0xee82856bf20e2aa6
+import NonFungibleToken from 0xf8d6e0586b0a20c7
+import FlowToken from 0x0ae53cb6e3f42a79
+import TopTCollection from 0xf8d6e0586b0a20c7
+import NFTStorefront from 0xf8d6e0586b0a20c7
+
+transaction(
+    saleItemID: UInt64, saleItemPrice: UFix64
+    ) {
+    let flowReceiver: Capability<&FlowToken.Vault{FungibleToken.Receiver}>
+    let exampleNFTProvider: Capability<&TopTCollection.Collection{NonFungibleToken.Provider, NonFungibleToken.CollectionPublic}>
+    let storefront: &NFTStorefront.Storefront
+
+    prepare(acct: AuthAccount) {
+        // We need a provider capability, but one is not provided by default so we create one if needed.
+        let TopTNFTCollectionProviderForNFTStorefront = /private/TopTNFTCollectionProviderForNFTStorefront
+
+        self.flowReceiver = acct.getCapability<&FlowToken.Vault{FungibleToken.Receiver}>(/public/flowTokenReceiver)!
+        assert(self.flowReceiver.borrow() != nil, message: "Missing or mis-typed FlowToken receiver")
+           
+
+        if !acct.getCapability<&TopTCollection.Collection{NonFungibleToken.Provider, NonFungibleToken.CollectionPublic}>(TopTNFTCollectionProviderForNFTStorefront)!.check() {
+            acct.link<&TopTCollection.Collection{NonFungibleToken.Provider, NonFungibleToken.CollectionPublic}>(TopTNFTCollectionProviderForNFTStorefront, target: TopTCollection.CollectionStoragePath)
+        }
+
+        self.exampleNFTProvider = acct.getCapability<&TopTCollection.Collection{NonFungibleToken.Provider, NonFungibleToken.CollectionPublic}>(TopTNFTCollectionProviderForNFTStorefront)!
+        assert(self.exampleNFTProvider.borrow() != nil, message: "Missing or mis-typed TopTCollection.Collection provider")
+
+        self.storefront = acct.borrow<&NFTStorefront.Storefront>(from: NFTStorefront.StorefrontStoragePath)
+            ?? panic("Missing or mis-typed NFTStorefront Storefront")
+    }
+
+    execute {
+        let saleCut = NFTStorefront.SaleCut(
+            receiver: self.flowReceiver,
+            amount: saleItemPrice
+        )
+        self.storefront.createListing(
+            nftProviderCapability: self.exampleNFTProvider,
+            nftType: Type<@TopTCollection.NFT>(),
+            nftID: saleItemID,
+            salePaymentVaultType: Type<@FlowToken.Vault>(),
+            saleCuts: [saleCut]
+        )
     }
 }
-
+ 
 `
-const BUY = `\
-import Marketplace from 0x20a1514850974256
-import TopTNFTContract from 0x20a1514850974256
-import FungibleToken from 0x9a0766d93b6608b7
-
-//Transaction to make a bid in a marketplace for the given dropId and auctionId
-transaction(
-    // marketplace: Address, tokenId: UInt64, amount: UFix64
-    ) {
-	// reference to the buyer's NFT collection where they
-	// will store the bought NFT
-	let vaultCap: Capability<&{FungibleToken.Receiver}>
-	let collectionCap: Capability<&{TopTNFTContract.CollectionPublic}> 
-	// Vault that will hold the tokens that will be used
-	// to buy the NFT
-	let temporaryVault: @FungibleToken.Vault
-
-	prepare(account: AuthAccount) {
-
-		// get the references to the buyer's Vault and NFT Collection receiver
-		var collectionCap = account.getCapability<&{TopTNFTContract.CollectionPublic}>(TopTNFTContract.CollectionPublicPath)
-
-		// if collection is not created yet we make it.
-		if !collectionCap.check() {
-			account.unlink(TopTNFTContract.CollectionPublicPath)
-			destroy <- account.load<@AnyResource>(from:TopTNFTContract.CollectionStoragePath)
-
-			// store an empty NFT Collection in account storage
-			account.save<@TopTNFTContract.Collection>(<- TopTNFTContract.createEmptyCollection(), to: TopTNFTContract.CollectionStoragePath)
-
-			// publish a capability to the Collection in storage
-			account.link<&{TopTNFTContract.CollectionPublic}>(TopTNFTContract.CollectionPublicPath, target: TopTNFTContract.CollectionStoragePath)
-		}
-
-		self.collectionCap=collectionCap
-
-		self.vaultCap = account.getCapability<&{FungibleToken.Receiver}>(/public/flowTokenReceiver)
-
-		let vaultRef = account.borrow<&FungibleToken.Vault>(from: /storage/flowTokenVault)
-		?? panic("Could not borrow owner's Vault reference")
-
-		// withdraw tokens from the buyer's Vault
-		self.temporaryVault <- vaultRef.withdraw(amount: 10.0)
-	}
-
-	execute {
-		// get the read-only account storage of the seller
-		let seller = getAccount(0x20a1514850974256)
-
-		let marketplace= seller.getCapability(Marketplace.CollectionPublicPath).borrow<&{Marketplace.SalePublic}>()
-		?? panic("Could not borrow seller's sale reference")
-
-		marketplace.purchase(tokenID: 0, recipientCap:self.collectionCap, buyTokens: <- self.temporaryVault)
-	}
-}
-
-`
-
-async function buy() {
+async function lazyMint() {
+  const artID = 0.01
+  const price = 0.000001
+  const currentUser = await fcl.currentUser().snapshot()
+  const addr = currentUser.addr
   const tx = await fcl.send([
-    fcl.transaction(BUY),
+    fcl.transaction(LAZY_MINT),
     fcl.proposer(fcl.currentUser().authorization),
     fcl.authorizations([
       fcl.currentUser().authorization,
     ]),
     fcl.payer(fcl.currentUser().authorization),
     fcl.limit(1000),
+    fcl.args([
+      fcl.arg(currentUser,t.Address),
+      fcl.arg(artID, t.UFix64),
+      fcl.arg(price,t.UFix64)
+    ]),
   ])
     
   fcl
@@ -534,46 +315,58 @@ async function buy() {
   
 
 }
-async function settle(){
-
+async function buy() {
+  const artID = 0
+  const price = 0.000001
   const tx = await fcl.send([
-    fcl.transaction(SETTLE_AUC),
+    fcl.transaction(BUY),
     fcl.proposer(fcl.currentUser().authorization),
     fcl.authorizations([
       fcl.currentUser().authorization,
     ]),
     fcl.payer(fcl.currentUser().authorization),
     fcl.limit(1000),
+    fcl.args([
+      fcl.arg(artID, t.UInt64),
+      fcl.arg(price,t.UFix64)
+    ]),
   ])
+    
+  fcl
+    .tx(tx)
+    .subscribe(console.log)
+  
   
 
-  var transaction = await fcl.tx(tx).onceSealed().finally(() => {
-
-  })
-  console.log(transaction)
-  
 }
-async function placeBid(){
 
+
+async function lsit_for_sale() {
+  const artID = 0
+  const price = 0.000001
   const tx = await fcl.send([
-    fcl.transaction(PLACE_BID),
+    fcl.transaction(LIST_FOR_SALE),
     fcl.proposer(fcl.currentUser().authorization),
     fcl.authorizations([
       fcl.currentUser().authorization,
     ]),
     fcl.payer(fcl.currentUser().authorization),
     fcl.limit(1000),
+    fcl.args([
+      fcl.arg(artID, t.UInt64),
+      fcl.arg(price,t.UFix64)
+    ]),
+    
   ])
+    
+  fcl
+    .tx(tx)
+    .subscribe(console.log)
+  
   
 
-  var transaction = await fcl.tx(tx).onceSealed().finally(() => {
-
-  })
-  console.log(transaction)
-  
 }
-async function mint(){
-
+async function mint() {
   const tx = await fcl.send([
     fcl.transaction(MINT),
     fcl.proposer(fcl.currentUser().authorization),
@@ -583,124 +376,20 @@ async function mint(){
     fcl.payer(fcl.currentUser().authorization),
     fcl.limit(1000),
   ])
+    
   fcl
     .tx(tx)
     .subscribe(console.log)
+  await console.log(tx)
   
-}
-async function prepareCollSale(){
-  
-  
-  
-  const tx = await fcl.send([
-    fcl.transaction(PREPARE_COLL_SALE),
-    fcl.proposer(fcl.currentUser().authorization),
-    fcl.authorizations([
-      fcl.currentUser().authorization,
-    ]),
-    fcl.payer(fcl.currentUser().authorization),
-    fcl.limit(1000),
-  ])
 
 }
-async function prepACcountVault(){
-  
-  
-  
-  const tx = await fcl.send([
-    fcl.transaction(PRE_ACCT_VAULT),
-    fcl.proposer(fcl.currentUser().authorization),
-    fcl.authorizations([
-      fcl.currentUser().authorization,
-    ]),
-    fcl.payer(fcl.currentUser().authorization),
-    fcl.limit(1000),
-  ])
-
-}
-async function unauth(){
-  fcl.currentUser.unauthenticate()
-  const currentUser = await fcl.currentUser().snapshot()
-  console.log("The Current User", currentUser)
-}
-
-async function auth(){
-  fcl.authenticate()
-  const currentUser = await fcl.currentUser().snapshot()
-  console.log("The Current User", currentUser)
-}
-
-async function buyNFT(){
-  const tx = await fcl.send([
-    fcl.transaction(BUY_NFT),
-    fcl.proposer(fcl.currentUser().authorization),
-    fcl.authorizations([
-      fcl.currentUser().authorization,
-    ]),
-    fcl.payer(fcl.currentUser().authorization),
-    fcl.limit(1000),
-  ])
-  fcl
-    .tx(tx)
-    .subscribe(console.log)
-}
-async function prepAuction(){
-  
-  
-  
-  const tx = await fcl.send([
-    fcl.transaction(PREP_AUCTION),
-    fcl.proposer(fcl.currentUser().authorization),
-    fcl.authorizations([
-      fcl.currentUser().authorization,
-    ]),
-    fcl.payer(fcl.currentUser().authorization),
-    fcl.limit(1000),
-  ])
-
-}
-async function prepareSale(){
-  
-  
-  
-  const tx = await fcl.send([
-    fcl.transaction(LIST_FOR_SALE),
-    fcl.proposer(fcl.currentUser().authorization),
-    fcl.authorizations([
-      fcl.currentUser().authorization,
-    ]),
-    fcl.payer(fcl.currentUser().authorization),
-    fcl.limit(1000),
-  ])
-  fcl
-    .tx(tx)
-    .subscribe(console.log)
-  
-}
-
-async function prepare(){
-  
-  const tx = await fcl.send([
-    fcl.transaction(PREPARE_NFT_COLLECTION),
-    fcl.proposer(fcl.currentUser().authorization),
-    fcl.authorizations([
-      fcl.currentUser().authorization,
-    ]),
-    fcl.payer(fcl.currentUser().authorization),
-    fcl.limit(1000),
-  ])
-  
-  fcl
-  .tx(tx)
-  .subscribe(console.log)
-  
-}
-async function print(){
+async function printSales(){
   const currentUser = await fcl.currentUser().snapshot()
   const addr = currentUser.addr
   
 const result = await fcl.query({
-  cadence: SIMPLE_PRINT_SCRIPT,
+  cadence: PRINT_SALES,
   args: (arg, t) => [arg(addr, t.Address)],
 });
 
@@ -709,6 +398,41 @@ console.log(result);
 
 
 }
+async function printNFTS(){
+  // const currentUser = await fcl.currentUser().snapshot()
+  // const addr = currentUser.addr
+  
+const result = await fcl.query({
+  cadence: SIMPLE_PRINT_SCRIPT,
+  // args: (arg, t) => [arg(addr, t.Address)],
+});
+
+  
+console.log(result);
+
+
+}
+
+async function unauth(){
+  fcl.currentUser.unauthenticate()
+  const currentUser = await fcl.currentUser().snapshot()
+  console.log("The Current User", currentUser)
+}
+
+async function auth(){
+  fcl.authenticate().finally(async() => {
+
+    const currentUser = await fcl.currentUser().snapshot()
+  console.log("The Current User1", currentUser)
+  })
+  // const currentUser = await fcl.currentUser().snapshot()
+  // console.log("The Current User1", currentUser)
+
+  // const currentUser2 = await fcl.currentUser().snapshot()
+  // console.log("The Current User2", currentUser2)
+}
+
+
 
 export default function Home() {
   return (
@@ -726,6 +450,19 @@ export default function Home() {
 
         <div className={styles.grid}>
         <button
+        onClick={buy}
+        >
+        buy
+        </button>
+        
+        <button
+        onClick={lsit_for_sale}
+        >
+          list for sale
+        </button>
+        
+
+        <button
         onClick={mint}
         >
           mint
@@ -740,39 +477,19 @@ export default function Home() {
         >
           auth
         </button>
-        
         <button
-        onClick={buyNFT}
+        onClick={printSales}
         >
-        buy NFT!!!!!!!
-        </button>
-        <button
-        onClick={prepare}
-        >
-          prepare account NFT collection
-        </button>
-        
-        <button
-        onClick={print}
-        >
-          printNFTS
+          print Sales
 
         </button>
         <button
-        onClick={prepareCollSale}
+        onClick={printNFTS}
         >
-          prepare sale collection
-        </button> 
-        <button
-        onClick={prepareSale}
-        >
-          prepare NFT sale
-        </button> 
-        <button
-        onClick={buy}
-        >
-          buy NFT
-        </button> 
+          print NFTS
+
+        </button>
+        
         </div>
         
       </main>
