@@ -316,6 +316,7 @@ async function lazyMint() {
 
 }
 async function buy() {
+  
   const artID = 0
   const price = 0.000001
   const tx = await fcl.send([
@@ -331,7 +332,8 @@ async function buy() {
       fcl.arg(price,t.UFix64)
     ]),
   ])
-    
+    // lol I am writing code lol they think I work now
+
   fcl
     .tx(tx)
     .subscribe(console.log)
